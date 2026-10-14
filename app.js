@@ -57,9 +57,9 @@ let state = 'welcome', beforePause = 'running', lane = 1, smoothLane = 1, distan
 let jump = 0, slide = 0, invincible = 0, shield = 0, magnet = 0, multiplier = 1, streak = 0;
 let objects = [], particles = [], sceneryObjects = [], spawnTimer = 0, nextQuiz = 220;
 let quizRemaining = 0, quizTotal = 7, currentQuestion = null, correctAnswers = 0, attempted = 0, questionDeck = [];
-let chapter = 0, time = 0, lastTime = 0, toastTime = 0, revealTime = 0, shake = 0, sound = false, audio;
+let chapter = 0, time = 0, lastTime = 0, toastTime = 0, revealTime = 0, shake = 0, sound = true, audio;
 let best = 0, lastLearned = null, accumulator = 0, demoDistance = 0;
-try { best = Number(localStorage.getItem('bible-runner-score-v2')) || 0; sound = localStorage.getItem('bible-runner-sound') === 'on'; } catch {}
+try { best = Number(localStorage.getItem('bible-runner-score-v2')) || 0; sound = localStorage.getItem('bible-runner-sound') !== 'off'; } catch {}
 $('best').textContent = best.toLocaleString();
 function resize() {
   const rect = canvas.getBoundingClientRect(); W = rect.width; H = rect.height;
@@ -82,12 +82,108 @@ function poly(points, color, stroke) {
 function worldPoly(coords, color, stroke) { poly(coords.map(p => scenePoint(...p)), color, stroke); }
 function ellipse(x, y, rx, ry, color) { ctx.fillStyle = color; ctx.beginPath(); ctx.ellipse(x, y, rx, ry, 0, 0, TAU); ctx.fill(); }
 function line(points, color, width) { ctx.strokeStyle = color; ctx.lineWidth = width; ctx.lineCap = 'round'; ctx.beginPath(); points.forEach((p, i) => i ? ctx.lineTo(...p) : ctx.moveTo(...p)); ctx.stroke(); }
-function tone(freq, duration = .13, type = 'sine', volume = .045) {
-  if (!sound) return;
-  try { audio ||= new (window.AudioContext || window.webkitAudioContext)(); const osc = audio.createOscillator(), gain = audio.createGain(); osc.type = type; osc.frequency.setValueAtTime(freq, audio.currentTime); osc.frequency.exponentialRampToValueAtTime(freq * .6, audio.currentTime + duration); gain.gain.setValueAtTime(volume, audio.currentTime); gain.gain.exponentialRampToValueAtTime(.001, audio.currentTime + duration); osc.connect(gain); gain.connect(audio.destination); osc.start(); osc.stop(audio.currentTime + duration); } catch {}
+// Original procedural score: plucked strings, breathy flute, soft frame drums.
+// Everything is generated locally; no music downloads or third-party recordings.
+let masterBus, musicBus, effectsBus, reverbBus, musicAnalyser, windBus;
+let musicStep = 0, musicNext = 0, musicPlaying = false, lastAudioState = '';
+const MUSIC_STEP = 60 / 92 / 2;
+const noteHz = midi => 440 * Math.pow(2, (midi - 69) / 12);
+function initAudio() {
+  if (!sound) return false;
+  try {
+    if (!audio) {
+      audio = new (window.AudioContext || window.webkitAudioContext)();
+      masterBus = audio.createGain(); masterBus.gain.value = .65;
+      const compressor = audio.createDynamicsCompressor(); compressor.threshold.value = -15; compressor.knee.value = 18; compressor.ratio.value = 3;
+      musicAnalyser = audio.createAnalyser(); musicAnalyser.fftSize = 1024;
+      masterBus.connect(compressor); compressor.connect(musicAnalyser); musicAnalyser.connect(audio.destination);
+      musicBus = audio.createGain(); musicBus.gain.value = .72; musicBus.connect(masterBus);
+      effectsBus = audio.createGain(); effectsBus.gain.value = .8; effectsBus.connect(masterBus);
+      const room = audio.createConvolver(), impulse = audio.createBuffer(2, Math.floor(audio.sampleRate * 1.5), audio.sampleRate);
+      for (let channel = 0; channel < 2; channel++) { const data = impulse.getChannelData(channel); for (let i = 0; i < data.length; i++) data[i] = (Math.random() * 2 - 1) * Math.pow(1 - i / data.length, 3) * .32; }
+      room.buffer = impulse; reverbBus = audio.createGain(); reverbBus.gain.value = .2;
+      musicBus.connect(room); effectsBus.connect(room); room.connect(reverbBus); reverbBus.connect(masterBus);
+      const wind = audio.createBufferSource(); wind.buffer = noiseBuffer(3); wind.loop = true;
+      const lowpass = audio.createBiquadFilter(); lowpass.type = 'lowpass'; lowpass.frequency.value = 290;
+      windBus = audio.createGain(); windBus.gain.value = .018; wind.connect(lowpass); lowpass.connect(windBus); windBus.connect(musicBus); wind.start();
+    }
+    if ((audio.state === 'suspended' || audio.state === 'interrupted') && !document.hidden && state !== 'paused') audio.resume().catch(() => {});
+    return true;
+  } catch { return false; }
 }
-function updateSound() { $('sound').innerHTML = '♫' + (sound ? '' : '<span class="slash"></span>'); $('sound').setAttribute('aria-label', sound ? 'Disable sound' : 'Enable sound'); }
-updateSound(); $('sound').onclick = () => { sound = !sound; updateSound(); try { localStorage.setItem('bible-runner-sound', sound ? 'on' : 'off'); } catch {} tone(620); };
+function noiseBuffer(seconds) {
+  const buffer = audio.createBuffer(1, Math.floor(audio.sampleRate * seconds), audio.sampleRate), data = buffer.getChannelData(0);
+  for (let i = 0; i < data.length; i++) data[i] = Math.random() * 2 - 1;
+  return buffer;
+}
+function voice(frequency, at, length, volume, type = 'sine', bus = musicBus, endFrequency = frequency) {
+  const osc = audio.createOscillator(), gain = audio.createGain(); osc.type = type;
+  osc.frequency.setValueAtTime(frequency, at); if (frequency !== endFrequency) osc.frequency.exponentialRampToValueAtTime(endFrequency, at + length);
+  gain.gain.setValueAtTime(.0001, at); gain.gain.exponentialRampToValueAtTime(Math.max(.0002, volume), at + Math.min(.025, length * .12));
+  gain.gain.exponentialRampToValueAtTime(.0001, at + length); osc.connect(gain); gain.connect(bus); osc.start(at); osc.stop(at + length + .02);
+  osc.onended = () => { osc.disconnect(); gain.disconnect(); };
+}
+function noise(at, length, volume, frequency, bus = musicBus) {
+  const source = audio.createBufferSource(), filter = audio.createBiquadFilter(), gain = audio.createGain(); source.buffer = noiseBuffer(length);
+  filter.type = 'bandpass'; filter.frequency.value = frequency; filter.Q.value = .7;
+  gain.gain.setValueAtTime(volume, at); gain.gain.exponentialRampToValueAtTime(.0001, at + length);
+  source.connect(filter); filter.connect(gain); gain.connect(bus); source.start(at); source.stop(at + length);
+  source.onended = () => { source.disconnect(); filter.disconnect(); gain.disconnect(); };
+}
+function scoreStep(step, at) {
+  const eighth = step % 16, bar = Math.floor(step / 16), root = [50, 46, 48, 45][bar % 4];
+  const melodies = [[12,19,22,24,19,17,15,19,12,19,27,24,22,19,17,15], [12,19,24,22,19,15,17,19,12,17,22,24,19,17,15,12], [12,16,19,24,19,16,21,19,12,19,24,28,24,21,19,16]];
+  // A lute-like harmonic pluck, with a short bright attack and a warm body.
+  if (eighth % 2 === 0 || state === 'running') {
+    const f = noteHz(root + melodies[chapter][eighth]);
+    voice(f, at, 1.15, .066); voice(f * 2, at, .55, .023); voice(f * 3, at, .21, .012);
+  }
+  if (eighth === 0 || eighth === 8) {
+    voice(noteHz(root - 12), at, 2.25, .075);
+    const third = chapter === 2 ? 4 : 3;
+    for (const offset of [0, third, 7]) { const f = noteHz(root + 12 + offset); voice(f, at + .05, 2.7, .019); voice(f * 1.003, at + .05, 2.7, .01); }
+  }
+  // Sparse flute phrases float above the rhythm every other bar.
+  if (bar % 2 === 1 && [2,6,10,14].includes(eighth)) { const f = noteHz(root + 24 + [0,7,5,3][Math.floor(eighth / 4)]); voice(f, at, .9, .029); voice(f * 2, at, .75, .004); }
+  if (state === 'running') {
+    if (eighth % 4 === 0) { voice(140, at, .21, .13, 'sine', musicBus, 48); noise(at, .045, .025, 600); }
+    else if (eighth % 4 === 2) { voice(205, at, .1, .032, 'sine', musicBus, 100); noise(at, .055, .027, 1450); }
+    if (eighth % 2 === 1) noise(at, .05, .013, 4200);
+  }
+}
+function updateMusic() {
+  if (!audio) return;
+  const shouldPlay = sound && !document.hidden && state !== 'paused';
+  const target = !shouldPlay ? 0 : state === 'quiz' ? .32 : state === 'ended' ? .28 : state === 'welcome' ? .45 : .72;
+  const signature = state + ':' + shouldPlay;
+  if (signature !== lastAudioState) {
+    masterBus.gain.setTargetAtTime(shouldPlay ? .65 : 0, audio.currentTime, .035);
+    musicBus.gain.setTargetAtTime(target, audio.currentTime, .3); lastAudioState = signature;
+  }
+  if (!shouldPlay || audio.state !== 'running') { musicPlaying = false; return; }
+  if (!musicPlaying) { musicNext = audio.currentTime + .05; musicPlaying = true; }
+  if (musicNext < audio.currentTime) musicNext = audio.currentTime + .025;
+  while (musicNext < audio.currentTime + .18) { scoreStep(musicStep++, musicNext); musicNext += MUSIC_STEP; }
+}
+function tone(freq, duration = .13, type = 'sine', volume = .045) {
+  if (!sound || !initAudio()) return;
+  const at = audio.currentTime + .008;
+  // Soft layered effects instead of bare electronic beeps.
+  if (freq >= 880) { voice(freq, at, duration + .16, volume, 'sine', effectsBus); voice(freq * 1.5, at + .035, duration + .12, volume * .3, 'sine', effectsBus); }
+  else if (freq <= 180) { voice(freq, at, duration, volume * 1.2, 'sine', effectsBus, Math.max(35, freq * .35)); noise(at, .12, .055, 450, effectsBus); }
+  else if (freq === 370 || freq === 200) { noise(at, duration + .05, .085, freq === 370 ? 1700 : 750, effectsBus); voice(freq, at, duration, .014, 'sine', effectsBus, freq * 1.45); }
+  else { voice(freq, at, duration + .15, volume, 'sine', effectsBus); voice(freq * 1.25, at + .04, duration + .2, volume * .35, 'sine', effectsBus); }
+  updateMusic();
+}
+function updateSound() {
+  $('sound').innerHTML = '♫' + (sound ? '' : '<span class="slash"></span>');
+  $('sound').setAttribute('aria-label', sound ? 'Mute music and effects' : 'Enable music and effects');
+  $('sound').setAttribute('aria-pressed', String(sound)); $('sound').title = sound ? 'Music & effects on' : 'Music & effects off';
+}
+updateSound(); $('sound').onclick = () => {
+  sound = !sound; updateSound(); try { localStorage.setItem('bible-runner-sound', sound ? 'on' : 'off'); } catch {}
+  if (sound) { initAudio(); tone(620); } updateMusic();
+};
 $('fullscreen').onclick = async () => { try { if (document.fullscreenElement) await document.exitFullscreen(); else await $('app').requestFullscreen(); } catch { notify('Full screen unavailable', 'Your browser still supports swipe and button controls.'); } };
 function buildScenery() {
   sceneryObjects = [];
@@ -120,10 +216,10 @@ function start() {
 $('start').onclick = start; $('restart').onclick = start; $('tutorial-start').onclick = start;
 $('practice').onclick = () => show('tutorial');
 function pause() {
-  if (state === 'running' || state === 'quiz') { beforePause = state; state = 'paused'; show('pause-screen'); $('pause').textContent = '▶'; }
+  if (state === 'running' || state === 'quiz') { beforePause = state; state = 'paused'; show('pause-screen'); $('pause').textContent = '▶'; updateMusic(); }
   else if (state === 'paused') resume();
 }
-function resume() { if (state !== 'paused') return; state = beforePause; show('pause-screen', false); $('pause').textContent = '❚❚'; }
+function resume() { if (state !== 'paused') return; state = beforePause; initAudio(); show('pause-screen', false); $('pause').textContent = '❚❚'; }
 $('pause').onclick = pause; $('resume').onclick = resume; $('quit').onclick = () => finish();
 function home() {
   state = 'welcome'; objects = []; particles = []; lane = smoothLane = 1; chapter = 0; jump = slide = 0; shield = magnet = 0;
@@ -160,7 +256,7 @@ let touch = null;
 canvas.addEventListener('pointerdown', event => { touch = { x: event.clientX, y: event.clientY, id: event.pointerId }; canvas.setPointerCapture(event.pointerId); });
 canvas.addEventListener('pointerup', event => { if (!touch || touch.id !== event.pointerId) return; const dx = event.clientX - touch.x, dy = event.clientY - touch.y; if (Math.max(Math.abs(dx), Math.abs(dy)) > 22) action(Math.abs(dx) > Math.abs(dy) ? dx > 0 ? 'right' : 'left' : dy > 0 ? 'slide' : 'jump'); touch = null; });
 canvas.addEventListener('pointercancel', () => touch = null);
-document.addEventListener('visibilitychange', () => { if (document.hidden && (state === 'running' || state === 'quiz')) pause(); });
+document.addEventListener('visibilitychange', () => { if (document.hidden && (state === 'running' || state === 'quiz')) pause(); updateMusic(); });
 function beginQuiz() {
   state = 'quiz'; objects = []; quizRemaining = quizTotal; jump = slide = 0; $('wisdom-time').style.width = '100%';
   if (!questionDeck.length) questionDeck = shuffle(questions);
@@ -419,5 +515,5 @@ function render() {
   drawParticles();const haze=ctx.createLinearGradient(0,horizon-10,0,horizon+80);haze.addColorStop(0,palette.fog+'00');haze.addColorStop(.3,palette.fog+'40');haze.addColorStop(1,palette.fog+'00');ctx.fillStyle=haze;ctx.fillRect(0,horizon-10,W,100);
   ctx.restore();
 }
-function frame(now) {const dt=lastTime?Math.min((now-lastTime)/1000,.05):0;lastTime=now;update(dt);render();requestAnimationFrame(frame)}
+function frame(now) {const dt=lastTime?Math.min((now-lastTime)/1000,.05):0;lastTime=now;update(dt);updateMusic();render();requestAnimationFrame(frame)}
 requestAnimationFrame(frame);

@@ -12,7 +12,7 @@ An original full-screen browser runner through three ancient-world chapters. Opt
 - Correct answers restore one heart, award points, and raise the multiplier up to ×5, with brief reward feedback and no scripture popup. Wrong answers reveal the answer and scripture reference without taking a heart.
 - Gather light for points. Shields absorb one impact; magnets collect light from all lanes. Both last twelve seconds.
 - New chapters appear every 650 meters: Jericho, Sinai, and Jerusalem. The three chapters cycle as the speed increases to its cap.
-- Space / Escape pauses; changing browser tabs pauses automatically. Sound is optional. Personal bests and sound preference are saved in local storage when available.
+- Space / Escape pauses; changing browser tabs pauses automatically. An original procedurally composed soundtrack blends warm plucked strings, flute, soft frame drums, and desert wind. Music changes with chapter and softens during trivia. Layered effects accompany pickups, movement, collisions, and answers. Audio starts with a player interaction; the music button mutes both music and effects, and that preference is saved. Pausing or hiding the page silences audio. Personal bests and sound preference are saved in local storage when available.
 
 ## Develop and verify
 
@@ -24,7 +24,7 @@ npm run check
 npm test
 ```
 
-The dependency-free development server listens on port 3000 (override with `PORT`). Eleven automated tests cover movement, jump/slide collision rules, trivia rewards and timing, power-ups, chapters, game over, restart, and the natural arrival of hazards.
+The dependency-free development server listens on port 3000 (override with `PORT`). Twelve automated tests cover movement, jump/slide collision rules, trivia rewards and timing, power-ups, chapters, game over, restart, and the natural arrival of hazards.
 
 ## GitHub Pages
 
