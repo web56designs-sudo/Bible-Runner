@@ -8,7 +8,7 @@ An original full-screen browser runner through three ancient-world chapters. Opt
 - Swipe up or press Up / W to jump over fallen stones.
 - Swipe down or press Down / S to slide under arches.
 - Avoid tall pillars by changing lanes. Touch buttons are also available.
-- At wisdom gates, tap an answer to resume immediately, or steer into its lane to commit after a brief lane switch. Keyboard 1/2/3 picks an answer directly; Enter confirms your current lane. The seven-second timer only runs while you have not answered.
+- At wisdom gates, tap an answer or press 1/2/3 to submit immediately. Movement never submits, skips, or dismisses the question, and answering does not change your lane. The countdown recedes while you think, but reaching zero does not dismiss the question; it stays until you answer.
 - Correct answers restore one heart, award points, and raise the multiplier up to ×5, with brief reward feedback and no scripture popup. Wrong answers reveal the answer and scripture reference without taking a heart.
 - Gather light for points. Shields absorb one impact; magnets collect light from all lanes. Both last twelve seconds.
 - New chapters appear every 650 meters: Jericho, Sinai, and Jerusalem. The three chapters cycle as the speed increases to its cap.

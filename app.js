@@ -56,7 +56,6 @@ let W = 0, H = 0, DPR = 1, horizon = 0, focal = 0;
 let state = 'welcome', beforePause = 'running', lane = 1, smoothLane = 1, distance = 0, coins = 0, points = 0, hearts = 3;
 let jump = 0, slide = 0, invincible = 0, shield = 0, magnet = 0, multiplier = 1, streak = 0;
 let objects = [], particles = [], sceneryObjects = [], spawnTimer = 0, nextQuiz = 220;
-let laneCommit = 0;
 let quizRemaining = 0, quizTotal = 7, currentQuestion = null, correctAnswers = 0, attempted = 0, questionDeck = [];
 let chapter = 0, time = 0, lastTime = 0, toastTime = 0, revealTime = 0, shake = 0, sound = false, audio;
 let best = 0, lastLearned = null, accumulator = 0, demoDistance = 0;
@@ -112,7 +111,7 @@ function updateHUD() {
 function notify(title, detail, error = false, duration = 3.5) { $('toast-title').textContent = title; $('toast-detail').textContent = detail; $('toast').classList.toggle('error', error); show('toast'); toastTime = duration; }
 function start() {
   state = 'running'; lane = smoothLane = 1; distance = coins = points = 0; hearts = 3; objects = []; particles = [];
-  jump = slide = invincible = shield = magnet = laneCommit = 0; multiplier = 1; streak = 0; nextQuiz = 220; spawnTimer = .9;
+  jump = slide = invincible = shield = magnet = 0; multiplier = 1; streak = 0; nextQuiz = 220; spawnTimer = .9;
   correctAnswers = attempted = 0; chapter = 0; questionDeck = shuffle(questions); lastLearned = null; toastTime = revealTime = 0;
   ['welcome', 'tutorial', 'pause-screen', 'end', 'wisdom', 'toast', 'region-reveal'].forEach(id => show(id, false));
   ['hud', 'controls', 'desktop-hint', 'pause', 'chapter-strip'].forEach(id => show(id));
@@ -147,15 +146,14 @@ function action(name) {
   if (name === 'right') lane = Math.min(2, lane + 1);
   if (name === 'jump' && jump === 0 && slide === 0) { jump = .88; tone(370, .16); }
   if (name === 'slide' && slide === 0 && jump === 0) { slide = .85; tone(200, .1); }
-  if (state === 'quiz' && (name === 'left' || name === 'right')) laneCommit = .28;
 }
 function chooseAnswer(index) {
   if (state !== 'quiz' || !Number.isInteger(index) || index < 0 || index > 2) return;
-  lane = index; laneCommit = 0; resolveQuiz();
+  resolveQuiz(index);
 }
 const keys = { ArrowLeft: 'left', a: 'left', ArrowRight: 'right', d: 'right', ArrowUp: 'jump', w: 'jump', ArrowDown: 'slide', s: 'slide', ' ': 'pause', Escape: 'pause' };
 window.addEventListener('keydown', event => {
-  if (state === 'quiz' && !event.repeat && (['1','2','3'].includes(event.key) || event.key === 'Enter' && event.target.tagName !== 'BUTTON')) { event.preventDefault(); chooseAnswer(event.key === 'Enter' ? lane : Number(event.key) - 1); return; }
+  if (state === 'quiz' && !event.repeat && ['1','2','3'].includes(event.key)) { event.preventDefault(); chooseAnswer(Number(event.key) - 1); return; }
   const name = keys[event.key]; if (!name || event.target.tagName === 'BUTTON' && event.key === ' ') return; if (state === 'running' || state === 'quiz' || state === 'paused') { event.preventDefault(); if (!event.repeat) action(name); } });
 document.querySelectorAll('[data-action]').forEach(button => button.addEventListener('pointerdown', e => { e.preventDefault(); action(button.dataset.action); }));
 let touch = null;
@@ -164,23 +162,23 @@ canvas.addEventListener('pointerup', event => { if (!touch || touch.id !== event
 canvas.addEventListener('pointercancel', () => touch = null);
 document.addEventListener('visibilitychange', () => { if (document.hidden && (state === 'running' || state === 'quiz')) pause(); });
 function beginQuiz() {
-  state = 'quiz'; objects = []; quizRemaining = quizTotal; jump = slide = laneCommit = 0; $('wisdom-time').style.width = '100%';
+  state = 'quiz'; objects = []; quizRemaining = quizTotal; jump = slide = 0; $('wisdom-time').style.width = '100%';
   if (!questionDeck.length) questionDeck = shuffle(questions);
   const source = questionDeck.pop(), choices = shuffle(source[1].map((text, i) => ({ text, right: i === source[2] })));
   currentQuestion = { source, choices }; $('question').textContent = source[0]; $('wisdom-count').textContent = String(attempted + 1).padStart(2, '0');
   $('answers').replaceChildren(); choices.forEach((answer, i) => {
-    const button = document.createElement('button'); const label = document.createElement('small'); label.textContent = ['LEFT LANE', 'MIDDLE LANE', 'RIGHT LANE'][i]; button.append(label, document.createTextNode(answer.text));
+    const button = document.createElement('button'); const label = document.createElement('small'); label.textContent = 'OPTION ' + (i + 1); button.append(label, document.createTextNode(answer.text));
     button.onclick = () => chooseAnswer(i); $('answers').append(button);
   }); show('toast', false); toastTime = 0; show('wisdom'); tone(580, .3);
 }
-function resolveQuiz(timedOut = false) {
+function resolveQuiz(answerIndex = lane) {
   if (state !== 'quiz') return;
-  laneCommit = 0; attempted++; const answer = currentQuestion.choices[lane], q = currentQuestion.source;
-  if (!timedOut && answer.right) {
+  attempted++; const answer = currentQuestion.choices[answerIndex], q = currentQuestion.source;
+  if (answer.right) {
     correctAnswers++; streak++; multiplier = Math.min(5, 1 + streak); points += 200 * multiplier; hearts = Math.min(3, hearts + 1);
     notify('Correct! +' + 200 * multiplier, 'Heart restored · ×' + multiplier + ' multiplier', false, 1.4); burst((lane - 1) * 3.5, PLAYER_Z, 2, 26, '#f9d889'); tone(880, .35);
   } else {
-    lastLearned = q; streak = 0; multiplier = 1; notify(timedOut ? 'Time’s up. Keep going.' : 'A lesson for the road.', 'Answer: ' + q[1][q[2]] + '. ' + q[3] + ' · ' + q[4], true, 5); tone(230, .3);
+    lastLearned = q; streak = 0; multiplier = 1; notify('A lesson for the road.', 'Answer: ' + q[1][q[2]] + '. ' + q[3] + ' · ' + q[4], true, 5); tone(230, .3);
   }
   state = 'running'; nextQuiz = distance + 260; spawnTimer = 1.1; invincible = Math.max(invincible, 1.5); show('wisdom', false); updateHUD();
 }
@@ -223,10 +221,8 @@ function update(dt) {
   if (nextChapter !== chapter) { chapter = nextChapter; $('reveal-title').textContent = chapters[chapter].name; $('reveal-subtitle').textContent = chapters[chapter].subtitle; show('region-reveal'); revealTime = 3.5; tone(660, .4); }
   particles.forEach(p => { p.x += p.vx * dt; p.z += p.vz * dt; p.y += p.vy * dt; p.vy -= dt * 10; p.life -= dt; }); particles = particles.filter(p => p.life > 0);
   if (state === 'quiz') {
-    quizRemaining -= dt;
+    quizRemaining = Math.max(0, quizRemaining - dt);
     $('wisdom-time').style.width = Math.max(0, quizRemaining / quizTotal) * 100 + '%';
-    if (laneCommit > 0) { laneCommit = Math.max(0, laneCommit - dt); if (laneCommit === 0) resolveQuiz(); }
-    if (state === 'quiz' && quizRemaining <= 0) resolveQuiz(true);
   }
   else {
     spawnTimer -= dt; if (spawnTimer <= 0) { spawnRow(); spawnTimer = Math.max(1.35, 2.3 - distance / 4500); }
