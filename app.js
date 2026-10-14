@@ -61,6 +61,66 @@ let chapter = 0, time = 0, lastTime = 0, toastTime = 0, revealTime = 0, shake = 
 let best = 0, lastLearned = null, accumulator = 0, demoDistance = 0;
 try { best = Number(localStorage.getItem('bible-runner-score-v2')) || 0; sound = localStorage.getItem('bible-runner-sound') !== 'off'; } catch {}
 $('best').textContent = best.toLocaleString();
+const SANCTUARY = 1950;
+let pursuit = .22, runClock = 0, wave = 'gather', previousWave = '', cleanCombo = 0, comboTime = 0, nearMisses = 0;
+let skillTime = 0, waveTime = 0, stepClock = 0, quizTick = 0, won = false, finishReason = '';
+let missionFlags = [false, false], windIntensity = 0;
+function waveFor(clock) { const phase = clock % 38; return phase < 11 ? 'gather' : phase < 15 ? 'warning' : phase < 27 ? 'surge' : 'recovery'; }
+function resetExpedition() {
+  pursuit = .22; runClock = 0; wave = 'gather'; previousWave = ''; cleanCombo = comboTime = nearMisses = 0;
+  skillTime = waveTime = stepClock = quizTick = 0; won = false; finishReason = ''; missionFlags = [false, false]; windIntensity = 0;
+  show('skill-banner', false); show('wave-banner', false); show('expedition'); $('wisdom').classList.remove('urgent');
+}
+function skill(title, detail, duration = 1.7) { $('skill-title').textContent = title; $('skill-detail').textContent = detail; show('skill-banner'); skillTime = duration; }
+function cleanEscape(kind, close = false) {
+  cleanCombo++; comboTime = 5; pursuit = Math.max(.04, pursuit - (close ? .045 : kind === 'jump' || kind === 'slide' ? .024 : .008));
+  const bonus = (close ? 75 : 20) * multiplier; points += bonus;
+  if (close) { nearMisses++; skill('Close call! +' + bonus, 'STORM PUSHED BACK · COMBO ' + cleanCombo); tone(1040, .1); }
+  else if (kind === 'jump' || kind === 'slide') { skill((kind === 'jump' ? 'Clean leap' : 'Perfect slide') + ' +' + bonus, 'COMBO ' + cleanCombo); tone(760, .12); }
+  if (cleanCombo > 0 && cleanCombo % 5 === 0) { const extra = cleanCombo * 20; points += extra; pursuit = Math.max(.04, pursuit - .035); skill(cleanCombo + ' escape combo!', '+' + extra + ' POINTS · KEEP YOUR RHYTHM'); tone(960, .2); }
+}
+function checkMissions() {
+  [coins >= 20, correctAnswers >= 3].forEach((done, index) => {
+    if (done && !missionFlags[index]) { missionFlags[index] = true; points += 500; pursuit = Math.max(.04, pursuit - .08); skill(index ? 'Wisdom keeper +500' : 'Bearer of light +500', 'BONUS MISSION COMPLETE', 2.5); tone(1100, .3); }
+  });
+}
+function updateExpedition(dt) {
+  if (skillTime > 0) { skillTime -= dt; if (skillTime <= 0) show('skill-banner', false); }
+  if (waveTime > 0) { waveTime -= dt; if (waveTime <= 0) show('wave-banner', false); }
+  if (state === 'quiz') {
+    const urgent = quizRemaining <= 3; $('wisdom').classList.toggle('urgent', urgent);
+    const tick = Math.ceil(quizRemaining); if (urgent && tick !== quizTick && tick > 0) { quizTick = tick; tone(420 + tick * 60, .075, 'sine', .025); }
+    return; // Reading trivia never lets the storm close in.
+  }
+  runClock += dt; wave = waveFor(runClock);
+  if (wave !== previousWave) {
+    previousWave = wave;
+    const labels = {
+      gather: ['GATHER YOUR COURAGE', 'Follow the light. Find your rhythm.'],
+      warning: ['THE TRAIL IS BREAKING', ['Falling masonry ahead. Watch the road.', 'A sand squall is building. Keep your eyes on the path.', 'Broken causeway ahead. Jump gaps or switch lanes.'][chapter]],
+      surge: [['THE WALLS ARE FALLING', 'INTO THE SANDSTORM', 'THE BROKEN CAUSEWAY'][chapter], 'Stay sharp. There is always a clear lane.'],
+      recovery: ['A MOMENT TO BREATHE', 'Gather light. The sanctuary is getting closer.']
+    };
+    if (runClock > 1) { $('wave-title').textContent = labels[wave][0]; $('wave-detail').textContent = labels[wave][1]; show('wave-banner'); waveTime = wave === 'warning' ? 3.2 : 2.1; }
+  }
+  pursuit = Math.min(1, pursuit + dt * (wave === 'surge' ? .006 : wave === 'recovery' ? -.002 : .0025)); pursuit = Math.max(.04, pursuit);
+  windIntensity += ((chapter === 1 && wave === 'surge' ? 1 : .1) - windIntensity) * Math.min(1, dt * 2);
+  if (comboTime > 0) { comboTime -= dt; if (comboTime <= 0) cleanCombo = 0; }
+  if (jump === 0 && slide === 0) {
+    stepClock += dt;
+    if (stepClock >= .3) { stepClock -= .3; burst((smoothLane - 1) * 3.5, PLAYER_Z + 1, .03, 2, '#d6b07c'); if (sound && audio && audio.state === 'running') noise(audio.currentTime + .005, .04, .016, 500, effectsBus); }
+  }
+  checkMissions();
+  if (pursuit >= 1) { finishReason = 'storm'; finish(); }
+}
+function updateExpeditionHUD() {
+  $('storm-progress').style.width = Math.round(pursuit * 100) + '%';
+  $('storm-label').textContent = pursuit > .8 ? 'AT YOUR HEELS' : pursuit > .55 ? 'CLOSING IN' : 'DISTANT';
+  $('storm-label').parentElement?.parentElement?.classList.toggle('danger', pursuit > .7);
+  $('mission-progress').textContent = Math.min(SANCTUARY, Math.floor(distance)).toLocaleString() + ' / 1,950 m';
+  $('mission-bonus').textContent = 'LIGHT ' + Math.min(20, coins) + '/20 · WISDOM ' + Math.min(3, correctAnswers) + '/3';
+}
+
 function resize() {
   const rect = canvas.getBoundingClientRect(); W = rect.width; H = rect.height;
   DPR = Math.min(devicePixelRatio || 1, 2); canvas.width = Math.round(W * DPR); canvas.height = Math.round(H * DPR);
@@ -146,6 +206,7 @@ function scoreStep(step, at) {
   // Sparse flute phrases float above the rhythm every other bar.
   if (bar % 2 === 1 && [2,6,10,14].includes(eighth)) { const f = noteHz(root + 24 + [0,7,5,3][Math.floor(eighth / 4)]); voice(f, at, .9, .029); voice(f * 2, at, .75, .004); }
   if (state === 'running') {
+    if ((wave === 'surge' || pursuit > .65) && eighth % 2 === 1) { voice(95,at,.18,.07,'sine',musicBus,42); noise(at,.05,.019,750); }
     if (eighth % 4 === 0) { voice(140, at, .21, .13, 'sine', musicBus, 48); noise(at, .045, .025, 600); }
     else if (eighth % 4 === 2) { voice(205, at, .1, .032, 'sine', musicBus, 100); noise(at, .055, .027, 1450); }
     if (eighth % 2 === 1) noise(at, .05, .013, 4200);
@@ -153,6 +214,7 @@ function scoreStep(step, at) {
 }
 function updateMusic() {
   if (!audio) return;
+  if (windBus) windBus.gain.setTargetAtTime(.012 + pursuit * .025 + windIntensity * .022, audio.currentTime, .6);
   const shouldPlay = sound && !document.hidden && state !== 'paused';
   const target = !shouldPlay ? 0 : state === 'quiz' ? .32 : state === 'ended' ? .28 : state === 'welcome' ? .45 : .72;
   const signature = state + ':' + shouldPlay;
@@ -163,7 +225,7 @@ function updateMusic() {
   if (!shouldPlay || audio.state !== 'running') { musicPlaying = false; return; }
   if (!musicPlaying) { musicNext = audio.currentTime + .05; musicPlaying = true; }
   if (musicNext < audio.currentTime) musicNext = audio.currentTime + .025;
-  while (musicNext < audio.currentTime + .18) { scoreStep(musicStep++, musicNext); musicNext += MUSIC_STEP; }
+  while (musicNext < audio.currentTime + .18) { scoreStep(musicStep++, musicNext); musicNext += MUSIC_STEP * (state === 'running' && wave === 'surge' ? .82 : 1); }
 }
 function tone(freq, duration = .13, type = 'sine', volume = .045) {
   if (!sound || !initAudio()) return;
@@ -194,6 +256,7 @@ function buildScenery() {
 }
 buildScenery();
 function updateHUD() {
+  updateExpeditionHUD();
   const score = Math.floor(points + distance * 3);
   $('score').textContent = score.toLocaleString(); $('distance').textContent = Math.floor(distance) + ' m';
   $('coins').textContent = coins; $('hearts').textContent = '♥ '.repeat(hearts) + '♡ '.repeat(3 - hearts);
@@ -211,7 +274,7 @@ function start() {
   correctAnswers = attempted = 0; chapter = 0; questionDeck = shuffle(questions); lastLearned = null; toastTime = revealTime = 0;
   ['welcome', 'tutorial', 'pause-screen', 'end', 'wisdom', 'toast', 'region-reveal'].forEach(id => show(id, false));
   ['hud', 'controls', 'desktop-hint', 'pause', 'chapter-strip'].forEach(id => show(id));
-  buildScenery(); updateHUD(); tone(500, .25); notify('The road is yours.', 'Gather light. Jump stones. Slide beneath arches. Avoid pillars.', false, 4);
+  resetExpedition(); buildScenery(); updateHUD(); tone(500, .25); notify('Reach the sanctuary.', 'Keep ahead of the storm. Clean escapes and wisdom buy you distance.', false, 4);
 }
 $('start').onclick = start; $('restart').onclick = start; $('tutorial-start').onclick = start;
 $('practice').onclick = () => show('tutorial');
@@ -223,17 +286,20 @@ function resume() { if (state !== 'paused') return; state = beforePause; initAud
 $('pause').onclick = pause; $('resume').onclick = resume; $('quit').onclick = () => finish();
 function home() {
   state = 'welcome'; objects = []; particles = []; lane = smoothLane = 1; chapter = 0; jump = slide = 0; shield = magnet = 0;
-  ['end', 'hud', 'controls', 'desktop-hint', 'pause', 'chapter-strip', 'wisdom', 'powers', 'toast', 'region-reveal', 'pause-screen'].forEach(id => show(id, false));
+  ['end', 'hud', 'controls', 'desktop-hint', 'pause', 'chapter-strip', 'wisdom', 'powers', 'toast', 'region-reveal', 'pause-screen', 'expedition', 'skill-banner', 'wave-banner'].forEach(id => show(id, false));
   show('welcome'); $('best').textContent = best.toLocaleString(); buildScenery();
 }
 $('home').onclick = home;
-function finish() {
+function finish(victory = false) {
+  if (state === 'ended') return;
+  won = victory; if (victory) points += 2000;
+  $('end-title').textContent = victory ? 'The sanctuary is yours.' : finishReason === 'storm' ? 'The storm caught up.' : 'A story worth running.';
   state = 'ended'; const score = Math.floor(points + distance * 3), newBest = score > best;
   best = Math.max(best, score); try { localStorage.setItem('bible-runner-score-v2', best); } catch {}
   $('end-score').textContent = score.toLocaleString(); $('end-distance').textContent = Math.floor(distance) + ' m'; $('end-coins').textContent = coins;
-  $('end-wisdom').textContent = correctAnswers + '/' + attempted; $('end-kicker').textContent = newBest ? '✧ A NEW PERSONAL BEST' : 'THE JOURNEY IS THE REWARD';
+  $('end-wisdom').textContent = correctAnswers + '/' + attempted; $('end-kicker').textContent = victory ? '✦ SANCTUARY REACHED · +2,000 POINTS' : newBest ? '✧ A NEW PERSONAL BEST' : 'THE JOURNEY IS THE REWARD';
   $('end-verse').textContent = lastLearned ? lastLearned[4] + ' — ' + lastLearned[3] : '“Let us run with perseverance the race marked out for us.” — Hebrews 12:1';
-  ['wisdom', 'pause-screen', 'controls', 'desktop-hint', 'toast', 'region-reveal'].forEach(id => show(id, false)); show('end'); show('pause', false); tone(180, .5);
+  ['wisdom', 'pause-screen', 'controls', 'desktop-hint', 'toast', 'region-reveal', 'expedition', 'skill-banner', 'wave-banner'].forEach(id => show(id, false)); show('end'); show('pause', false); tone(victory ? 1040 : 180, .5);
 }
 function action(name) {
   if (name === 'pause') { pause(); return; }
@@ -258,7 +324,7 @@ canvas.addEventListener('pointerup', event => { if (!touch || touch.id !== event
 canvas.addEventListener('pointercancel', () => touch = null);
 document.addEventListener('visibilitychange', () => { if (document.hidden && (state === 'running' || state === 'quiz')) pause(); updateMusic(); });
 function beginQuiz() {
-  state = 'quiz'; objects = []; quizRemaining = quizTotal; jump = slide = 0; $('wisdom-time').style.width = '100%';
+  state = 'quiz'; show('wave-banner', false); show('skill-banner', false); quizTick = 0; objects = []; quizRemaining = quizTotal; jump = slide = 0; $('wisdom-time').style.width = '100%';
   if (!questionDeck.length) questionDeck = shuffle(questions);
   const source = questionDeck.pop(), choices = shuffle(source[1].map((text, i) => ({ text, right: i === source[2] })));
   currentQuestion = { source, choices }; $('question').textContent = source[0]; $('wisdom-count').textContent = String(attempted + 1).padStart(2, '0');
@@ -271,12 +337,14 @@ function resolveQuiz(answerIndex = lane) {
   if (state !== 'quiz') return;
   attempted++; const answer = currentQuestion.choices[answerIndex], q = currentQuestion.source;
   if (answer && answer.right) {
+    pursuit = Math.max(.04, pursuit - .1); cleanCombo++; comboTime = 5;
     correctAnswers++; streak++; multiplier = Math.min(5, 1 + streak); points += 200 * multiplier; hearts = Math.min(3, hearts + 1);
     notify('Correct! +' + 200 * multiplier, 'Heart restored · ×' + multiplier + ' multiplier', false, 1.4); burst((lane - 1) * 3.5, PLAYER_Z, 2, 26, '#f9d889'); tone(880, .35);
   } else {
+    pursuit = Math.min(.97, pursuit + .04); cleanCombo = 0;
     lastLearned = q; streak = 0; multiplier = 1; notify(answer ? 'A lesson for the road.' : 'Time’s up. Here’s the answer.', 'Answer: ' + q[1][q[2]] + '. ' + q[3] + ' · ' + q[4], true, 5); tone(230, .3);
   }
-  state = 'running'; nextQuiz = distance + 260; spawnTimer = 1.1; invincible = Math.max(invincible, 1.5); show('wisdom', false); updateHUD();
+  state = 'running'; nextQuiz = distance + 260; spawnTimer = 1.1; invincible = Math.max(invincible, 1.5); show('wisdom', false); checkMissions(); updateHUD();
 }
 function burst(x, z, y, count, color) {
   for (let i = 0; i < count; i++) particles.push({ x, z, y, vx: random(-3, 3), vz: random(-4, 4), vy: random(1, 5), life: random(.35, .9), color });
@@ -284,24 +352,26 @@ function burst(x, z, y, count, color) {
 function hit(object) {
   if (invincible > 0) return;
   if (shield > 0) { shield = 0; invincible = 1.3; burst((lane - 1) * 3.5, PLAYER_Z, 2, 20, '#a6e5f5'); notify('Shield of faith', 'Your shield absorbed the impact.', false, 2); tone(390, .2); return; }
+  pursuit = Math.min(1, pursuit + .17); cleanCombo = 0; comboTime = 0;
   hearts--; invincible = 1.6; shake = reducedMotion ? 0 : .35; streak = 0; multiplier = 1; burst((lane - 1) * 3.5, PLAYER_Z, 1, 16, '#db9b76'); tone(130, .22, 'triangle');
   if (navigator.vibrate) navigator.vibrate(70);
-  if (hearts <= 0) { finish(); return; }
-  notify('Keep your courage.', object.type === 'arch' ? 'Slide ↓ beneath the stone arches.' : object.type === 'pillar' ? 'Switch lanes ↔ to avoid tall pillars.' : 'Jump ↑ over fallen stones.', true, 2.4);
+  if (hearts <= 0 || pursuit >= 1) { if (pursuit >= 1) finishReason = 'storm'; finish(); return; }
+  notify('Keep your courage.', object.type === 'arch' ? 'Slide ↓ beneath the stone arches.' : object.type === 'pillar' ? 'Switch lanes ↔ to avoid tall pillars.' : object.type === 'gap' ? 'Jump ↑ across broken sections of the path.' : 'Jump ↑ over fallen stones.', true, 2.4);
 }
 function spawnRow() {
-  const chosenLane = Math.floor(Math.random() * 3), difficulty = Math.min(distance / 2200, 1), r = Math.random();
-  if (r < .24) {
-    for (let i = 0; i < 5; i++) objects.push({ type: 'coin', lane: chosenLane, z: FAR + i * 7, hit: false });
-  } else if (r < .32 && distance > 70) {
-    objects.push({ type: Math.random() < .5 ? 'shield' : 'magnet', lane: chosenLane, z: FAR, hit: false });
-  } else {
-    const type = Math.random() < .42 ? 'rock' : Math.random() < .55 ? 'arch' : 'pillar';
-    objects.push({ type, lane: chosenLane, z: FAR, hit: false });
-    const safeLane = (chosenLane + 1 + Math.floor(Math.random() * 2)) % 3;
-    for (let i = 0; i < 3; i++) objects.push({ type: 'coin', lane: safeLane, z: FAR + i * 7, hit: false });
-    if (difficulty > .3 && Math.random() < difficulty * .45) objects.push({ type: 'rock', lane: (safeLane + 1) % 3, z: FAR + 30, hit: false });
+  const lanes = shuffle([0,1,2]), safe = lanes[0], activeWave = wave === 'surge';
+  if (wave === 'recovery' || Math.random() < (activeWave ? .12 : .3)) {
+    for (let i = 0; i < 5; i++) objects.push({ type: 'coin', lane: safe, z: FAR + i * 6, hit: false });
+    if (Math.random() < .25 && distance > 70) objects.push({type: Math.random() < .5 ? 'shield' : 'magnet',lane:lanes[1],z:FAR,hit:false});
+    return;
   }
+  function hazard(l) {
+    const r = Math.random(), type = activeWave && chapter === 2 && r < .5 ? 'gap' : r < .4 ? 'rock' : r < .7 ? 'arch' : 'pillar';
+    objects.push({type,lane:l,z:FAR,hit:false,falling:activeWave && chapter === 0 && type === 'rock'});
+  }
+  hazard(lanes[1]); if (activeWave && distance > 300) hazard(lanes[2]);
+  for (let i=0;i<3;i++) objects.push({type:'coin',lane:safe,z:FAR+i*6,hit:false});
+  if (!activeWave && Math.random()<.12) objects.push({type:Math.random()<.5?'shield':'magnet',lane:safe,z:FAR+23,hit:false});
 }
 function update(dt) {
   time += dt;
@@ -312,8 +382,9 @@ function update(dt) {
   smoothLane += (lane - smoothLane) * (1 - Math.exp(-dt * 14));
   jump = Math.max(0, jump - dt); slide = Math.max(0, slide - dt); invincible = Math.max(0, invincible - dt);
   shield = Math.max(0, shield - dt); magnet = Math.max(0, magnet - dt); shake = Math.max(0, shake - dt);
-  const speed = state === 'quiz' ? 15 : 31 + Math.min(distance / 100, 21); distance += dt * speed; moveScenery(dt * speed);
-  const nextChapter = Math.floor(distance / 650) % 3;
+  updateExpedition(dt); if (state === 'ended') return;
+  const speed = state === 'quiz' ? 15 : 31 + Math.min(distance / 100, 17) + (wave === 'surge' ? 7 : wave === 'recovery' ? -3 : 0); distance += dt * speed; moveScenery(dt * speed);
+  const nextChapter = Math.min(2, Math.floor(distance / 650));
   if (nextChapter !== chapter) { chapter = nextChapter; $('reveal-title').textContent = chapters[chapter].name; $('reveal-subtitle').textContent = chapters[chapter].subtitle; show('region-reveal'); revealTime = 3.5; tone(660, .4); }
   particles.forEach(p => { p.x += p.vx * dt; p.z += p.vz * dt; p.y += p.vy * dt; p.vy -= dt * 10; p.life -= dt; }); particles = particles.filter(p => p.life > 0);
   if (state === 'quiz') {
@@ -322,23 +393,26 @@ function update(dt) {
     if (quizRemaining === 0) resolveQuiz(null);
   }
   else {
-    spawnTimer -= dt; if (spawnTimer <= 0) { spawnRow(); spawnTimer = Math.max(1.35, 2.3 - distance / 4500); }
+    spawnTimer -= dt; if (spawnTimer <= 0) { spawnRow(); spawnTimer = wave === 'surge' ? 1.12 : wave === 'recovery' ? 2.2 : Math.max(1.6, 2.15 - distance / 6000); }
     for (const object of objects) {
+      if (state === 'ended') break;
       object.z -= speed * dt;
+      if (object.falling && object.z < 70 && !object.landed) { object.landed = true; burst((object.lane - 1) * 3.5, object.z, .4, 8, '#c8a577'); }
       if (object.hit) continue;
       const aligned = Math.abs(smoothLane - object.lane) < .43;
       if (object.type === 'coin' && magnet > 0 && object.z < 50 && object.z > PLAYER_Z) { object.hit = true; collect(object); }
       else if (object.z <= PLAYER_Z && object.z > PLAYER_Z - speed * dt - .5) {
         object.hit = true;
-        if (!aligned) continue;
+        if (!aligned) { if (['rock','arch','pillar','gap'].includes(object.type)) { const separation = Math.abs(smoothLane - object.lane); cleanEscape('dodge', separation < .8); } continue; }
         if (object.type === 'coin') collect(object);
         else if (object.type === 'shield') { shield = 12; burst((lane - 1) * 3.5, PLAYER_Z, 2, 18, '#96e2f5'); notify('Shield of faith', 'One impact protected · 12 seconds', false, 2.5); tone(690, .3); }
         else if (object.type === 'magnet') { magnet = 12; burst((lane - 1) * 3.5, PLAYER_Z, 2, 18, '#f4d28f'); notify('Gathering light', 'Light from every lane comes to you · 12 seconds', false, 2.5); tone(750, .3); }
-        else { const height = jump > 0 ? Math.sin(jump / .88 * Math.PI) * 3 : 0; if (object.type === 'pillar' || object.type === 'rock' && height < 1.25 || object.type === 'arch' && slide <= 0) hit(object); }
+        else { const height = jump > 0 ? Math.sin(jump / .88 * Math.PI) * 3 : 0; if (object.type === 'pillar' || (object.type === 'rock' || object.type === 'gap') && height < 1.25 || object.type === 'arch' && slide <= 0) hit(object); else cleanEscape(object.type === 'arch' ? 'slide' : 'jump'); }
       }
     }
     objects = objects.filter(o => o.z > -8 && !(o.hit && ['coin', 'shield', 'magnet'].includes(o.type)));
-    if (state === 'running' && distance >= nextQuiz) beginQuiz();
+    if (state === 'running' && distance >= SANCTUARY) { checkMissions(); finish(true); }
+    else if (state === 'running' && distance >= nextQuiz) beginQuiz();
   }
   accumulator += dt; if (accumulator > .08) { updateHUD(); accumulator = 0; }
 }
@@ -435,11 +509,18 @@ function drawObstacle(object, palette) {
     else if(object.type==='shield'){poly([{x:-.55,y:-.5},{x:0,y:-.7},{x:.55,y:-.5},{x:.45,y:.27},{x:0,y:.7},{x:-.45,y:.27}],'#85c7d6','#e1f8ff');line([[0,-.37],[0,.3]],'#e7faff',.08);line([[-.21,-.04],[.21,-.04]],'#e7faff',.08)}
     else{ctx.strokeStyle='#f5cf8a';ctx.lineWidth=.2;ctx.beginPath();ctx.arc(0,0,.45,0,Math.PI);ctx.stroke();ctx.fillStyle='#edb166';ctx.fillRect(-.55,-.42,.2,.48);ctx.fillRect(.35,-.42,.2,.48);ctx.fillStyle='#fff1ce';ctx.fillRect(-.55,-.42,.2,.14);ctx.fillRect(.35,-.42,.2,.14)}ctx.restore();return;
   }
+  if (object.type === 'gap') {
+    worldPoly([[x-1.6,z,.04],[x+1.6,z,.04],[x+1.55,z+4,.04],[x+.8,z+4.6,.04],[x+.3,z+4,.04],[x-1.6,z+4.3,.04]], '#302b30');
+    worldPoly([[x-1.6,z,.05],[x+1.6,z,.05],[x+1.3,z+.45,.05],[x+.3,z+.2,.05],[x-.8,z+.55,.05]], '#675444');
+    for (const edge of [-1.6,1.6]) { const a=scenePoint(x+edge,z,.05),b=scenePoint(x+edge,z+4,.05);line([[a.x,a.y],[b.x,b.y]],'#d6b985',Math.max(1,p.s*.035)); }
+    const q=scenePoint(x,z+2,.06);ctx.fillStyle='#efd291';ctx.textAlign='center';ctx.font=`${Math.max(9,p.s*.45)}px sans-serif`;ctx.fillText('↑',q.x,q.y);return;
+  }
   ellipse(p.x,p.y+1,p.s*1.25,p.s*.2,'#35251f33');
   if(object.type==='rock'){
+    ctx.save();if(object.falling)ctx.translate(0,-Math.max(0,(z-70)/50)*6*p.s);
     box(x,z,2.45,1.4,1.3,'#9b8166',palette.stone,'#78604c');
     const a=scenePoint(x-.7,z,1.31),b=scenePoint(x-.2,z+.6,1.31),c=scenePoint(x+.1,z+.8,1.31);line([[a.x,a.y],[b.x,b.y],[c.x,c.y]],'#5b483d80',p.s*.035);
-    box(x-.6,z+.3,.4,.6,1.42,'#b39c7a','#dac49b','#907958');
+    box(x-.6,z+.3,.4,.6,1.42,'#b39c7a','#dac49b','#907958');ctx.restore();
   }else if(object.type==='pillar'){
     box(x,z,1.4,1.1,4.1,'#ac9070',palette.stone,'#77604e');box(x,z-.1,1.75,1.3,.3,'#90714f','#c5a377');
     box(x,z,1.8,1.4,4.25,'#ac9070','#d7bd91','#7c634b');
@@ -507,12 +588,30 @@ function drawParticles() {
   // Ambient dust specks, drifting rather than repeating across the path.
   for(let i=0;i<20;i++){const x=((i*143.7+Math.sin(time*.15+i)*25)%(W+30))-15,y=((i*83.9-time*(i%3+1)*4)%(H+50)+H+50)%(H+50);ctx.globalAlpha=.15+Math.sin(time*.7+i)*.1;ellipse(x,y,i%3===0?1.8:.8,i%3===0?1.8:.8,'#f5d098')}ctx.globalAlpha=1;
 }
+function drawSanctuary(z) {
+  if(z<0)return;for(const side of [-1,1]){box(side*4.8,z,.9,2,8,'#b39d79','#efd39b','#72604c');box(side*4.8,z-.1,1.4,2.2,.4,'#ba9e72','#f5dc9d');}
+  worldPoly([[-5.5,z,7],[5.5,z,7],[5.5,z,8.6],[-5.5,z,8.6]],'#dac293');worldPoly([[-5.5,z,8.6],[5.5,z,8.6],[4,z,10],[-4,z,10]],'#eee0b2');
+  const p=scenePoint(0,z,5),radius=p.s*4;const glow=ctx.createRadialGradient(p.x,p.y,0,p.x,p.y,radius);glow.addColorStop(0,'#fff6b866');glow.addColorStop(1,'#fce29300');ctx.fillStyle=glow;ctx.fillRect(p.x-radius,p.y-radius,radius*2,radius*2);
+  ctx.fillStyle='#fff3c7';ctx.textAlign='center';ctx.font=`${Math.max(11,p.s*.8)}px Georgia`;ctx.fillText('✦',p.x,p.y-p.s*2.6);
+}
+function drawAtmosphere() {
+  if(!['running','quiz','paused','ended'].includes(state))return;
+  const surge=wave==='surge' && state!=='quiz';
+  // A visible bank of dust pursues from behind, rising as the danger meter fills.
+  const front=H*(1.055-pursuit*.29),dust=ctx.createLinearGradient(0,front-35,0,H);
+  dust.addColorStop(0,'#aa785100');dust.addColorStop(.5,'#b47d5040');dust.addColorStop(1,'#614032ba');ctx.fillStyle=dust;ctx.fillRect(0,Math.max(0,front-35),W,H);
+  for(let i=0;i<9;i++){const x=(i/8)*W+Math.sin(time*.5+i)*30,y=front+Math.sin(time*.9+i*2)*18,r=Math.min(W,H)*(.14+i%3*.02),g=ctx.createRadialGradient(x,y,0,x,y,r);g.addColorStop(0,'#bb8c6030');g.addColorStop(1,'#8c634400');ctx.fillStyle=g;ctx.fillRect(x-r,y-r,r*2,r*2)}
+  if(windIntensity>.2){ctx.save();ctx.globalAlpha=windIntensity*.13;ctx.strokeStyle='#efdbac';ctx.lineWidth=1;for(let i=0;i<23;i++){const x=((time*260+i*93)%(W+180))-100,y=horizon+((i*53.3)%(H-horizon));ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+55,y-9);ctx.stroke()}ctx.restore()}
+  if(surge&&!reducedMotion){ctx.save();ctx.strokeStyle='#ffe7b425';ctx.lineWidth=1;for(let i=0;i<12;i++){const side=i%2?1:-1,t=(time*.5+i*.087)%1;const x=W/2+side*W*(.3+t*.35),y=horizon+H*t;ctx.beginPath();ctx.moveTo(x,y);ctx.lineTo(x+side*22,y+40);ctx.stroke()}ctx.restore()}
+  if(pursuit>.7){const edge=ctx.createRadialGradient(W/2,H*.55,W*.2,W/2,H*.55,Math.max(W,H)*.65);edge.addColorStop(0,'#873b2500');edge.addColorStop(1,'#a3433b55');ctx.fillStyle=edge;ctx.fillRect(0,0,W,H)}
+}
 function render() {
-  const palette=chapters[chapter];ctx.save();if(shake>0)ctx.translate(Math.sin(time*100)*shake*18,Math.cos(time*83)*shake*10);
+  const palette=chapters[chapter];ctx.save();if(!reducedMotion && state==='running')ctx.translate(Math.sin(time*5)*.8,Math.cos(time*9)*.6);if(shake>0)ctx.translate(Math.sin(time*100)*shake*18,Math.cos(time*83)*shake*10);
   drawSky(palette);drawRoad(palette);
-  const drawables=[...sceneryObjects.map(o=>({o,scenery:true})),...objects.map(o=>({o,scenery:false})),{o:{z:PLAYER_Z},runner:true}].sort((a,b)=>b.o.z-a.o.z);
-  for(const item of drawables){if(item.runner)drawRunner();else if(item.scenery){if(item.o.type==='column')drawColumn(item.o,palette);else if(item.o.type==='torch')drawTorch(item.o,palette);else drawPalm(item.o)}else drawObstacle(item.o,palette)}
-  drawParticles();const haze=ctx.createLinearGradient(0,horizon-10,0,horizon+80);haze.addColorStop(0,palette.fog+'00');haze.addColorStop(.3,palette.fog+'40');haze.addColorStop(1,palette.fog+'00');ctx.fillStyle=haze;ctx.fillRect(0,horizon-10,W,100);
+  const sanctuary = distance > SANCTUARY - 210 && state !== 'welcome' ? [{o:{z:SANCTUARY-distance+PLAYER_Z},sanctuary:true}] : [];
+  const drawables=[...sanctuary,...sceneryObjects.map(o=>({o,scenery:true})),...objects.map(o=>({o,scenery:false})),{o:{z:PLAYER_Z},runner:true}].sort((a,b)=>b.o.z-a.o.z);
+  for(const item of drawables){if(item.sanctuary)drawSanctuary(item.o.z);else if(item.runner)drawRunner();else if(item.scenery){if(item.o.type==='column')drawColumn(item.o,palette);else if(item.o.type==='torch')drawTorch(item.o,palette);else drawPalm(item.o)}else drawObstacle(item.o,palette)}
+  drawParticles();drawAtmosphere();const haze=ctx.createLinearGradient(0,horizon-10,0,horizon+80);haze.addColorStop(0,palette.fog+'00');haze.addColorStop(.3,palette.fog+'40');haze.addColorStop(1,palette.fog+'00');ctx.fillStyle=haze;ctx.fillRect(0,horizon-10,W,100);
   ctx.restore();
 }
 function frame(now) {const dt=lastTime?Math.min((now-lastTime)/1000,.05):0;lastTime=now;update(dt);updateMusic();render();requestAnimationFrame(frame)}
