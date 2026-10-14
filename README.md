@@ -8,7 +8,7 @@ An original full-screen browser runner through three ancient-world chapters. Opt
 - Swipe up or press Up / W to jump over fallen stones.
 - Swipe down or press Down / S to slide under arches.
 - Avoid tall pillars by changing lanes. Touch buttons are also available.
-- At wisdom gates, tap an answer or press 1/2/3 to submit immediately. Movement never submits, skips, or dismisses the question, and answering does not change your lane. The countdown recedes while you think, but reaching zero does not dismiss the question; it stays until you answer.
+- At wisdom gates, tap an answer or press 1/2/3 to submit immediately. Movement never submits, skips, or dismisses the question, and answering does not change your lane. The countdown recedes while you think; at zero, the correct answer and reference appear and the run continues without an answer reward or a lost heart.
 - Correct answers restore one heart, award points, and raise the multiplier up to ×5, with brief reward feedback and no scripture popup. Wrong answers reveal the answer and scripture reference without taking a heart.
 - Gather light for points. Shields absorb one impact; magnets collect light from all lanes. Both last twelve seconds.
 - New chapters appear every 650 meters: Jericho, Sinai, and Jerusalem. The three chapters cycle as the speed increases to its cap.
@@ -24,7 +24,7 @@ npm run check
 npm test
 ```
 
-The dependency-free development server listens on port 3000 (override with `PORT`). Ten automated tests cover movement, jump/slide collision rules, trivia rewards and timing, power-ups, chapters, game over, restart, and the natural arrival of hazards.
+The dependency-free development server listens on port 3000 (override with `PORT`). Eleven automated tests cover movement, jump/slide collision rules, trivia rewards and timing, power-ups, chapters, game over, restart, and the natural arrival of hazards.
 
 ## GitHub Pages
 

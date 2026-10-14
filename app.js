@@ -174,11 +174,11 @@ function beginQuiz() {
 function resolveQuiz(answerIndex = lane) {
   if (state !== 'quiz') return;
   attempted++; const answer = currentQuestion.choices[answerIndex], q = currentQuestion.source;
-  if (answer.right) {
+  if (answer && answer.right) {
     correctAnswers++; streak++; multiplier = Math.min(5, 1 + streak); points += 200 * multiplier; hearts = Math.min(3, hearts + 1);
     notify('Correct! +' + 200 * multiplier, 'Heart restored · ×' + multiplier + ' multiplier', false, 1.4); burst((lane - 1) * 3.5, PLAYER_Z, 2, 26, '#f9d889'); tone(880, .35);
   } else {
-    lastLearned = q; streak = 0; multiplier = 1; notify('A lesson for the road.', 'Answer: ' + q[1][q[2]] + '. ' + q[3] + ' · ' + q[4], true, 5); tone(230, .3);
+    lastLearned = q; streak = 0; multiplier = 1; notify(answer ? 'A lesson for the road.' : 'Time’s up. Here’s the answer.', 'Answer: ' + q[1][q[2]] + '. ' + q[3] + ' · ' + q[4], true, 5); tone(230, .3);
   }
   state = 'running'; nextQuiz = distance + 260; spawnTimer = 1.1; invincible = Math.max(invincible, 1.5); show('wisdom', false); updateHUD();
 }
@@ -223,6 +223,7 @@ function update(dt) {
   if (state === 'quiz') {
     quizRemaining = Math.max(0, quizRemaining - dt);
     $('wisdom-time').style.width = Math.max(0, quizRemaining / quizTotal) * 100 + '%';
+    if (quizRemaining === 0) resolveQuiz(null);
   }
   else {
     spawnTimer -= dt; if (spawnTimer <= 0) { spawnRow(); spawnTimer = Math.max(1.35, 2.3 - distance / 4500); }
