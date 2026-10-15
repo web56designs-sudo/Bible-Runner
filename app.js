@@ -452,29 +452,64 @@ function drawSky(palette) {
   ctx.strokeStyle = '#382d3866'; ctx.lineWidth = 1;
   for (let i = 0; i < 5; i++) { const x = ((time * 6 + i * 59) % (W + 100)) - 30, y = horizon * .48 + Math.sin(i * 2) * 25; const wing = Math.sin(time * 3 + i) * 3; ctx.beginPath(); ctx.moveTo(x - 5, y - wing); ctx.quadraticCurveTo(x - 2, y - 2, x, y); ctx.quadraticCurveTo(x + 2, y - 2, x + 5, y - wing); ctx.stroke(); }
 }
+function stoneColor(hex, shift) {
+  const value = parseInt(hex.slice(1), 16);
+  return '#' + [value >> 16, value >> 8 & 255, value & 255].map(v => clamp(v + shift, 0, 255).toString(16).padStart(2, '0')).join('');
+}
 function drawRoad(palette) {
-  const offset = (state === 'welcome' ? demoDistance : distance) % 9;
-  worldPoly([[-5.7,0,0],[5.7,0,0],[5.7,380,0],[-5.7,380,0]], palette.road);
-  // Every tile is projected individually, creating true perspective motion.
-  for (let i = 35; i >= 0; i--) {
-    const z = i * 9 - offset, next = z + 9;
+  ctx.save(); ctx.globalAlpha = 1; ctx.globalCompositeOperation = 'source-over';
+  const travel = state === 'welcome' ? demoDistance : distance, offset = travel % 9, row = Math.floor(travel / 9);
+  // Solid foundation and vertical masonry faces, never a translucent overlay.
+  for (const side of [-1, 1]) {
+    const x = side * 5.85;
+    worldPoly([[x,0,0],[x,380,0],[x,380,-1.4],[x,0,-1.4]], side < 0 ? '#725943' : '#594536');
+    worldPoly([[x,0,-1.4],[x,380,-1.4],[x+side*.22,380,-1.7],[x+side*.22,0,-1.7]], '#392f29');
+  }
+  worldPoly([[-5.85,0,0],[5.85,0,0],[5.85,380,0],[-5.85,380,0]], stoneColor(palette.road,-18));
+  for (let i = 36; i >= 0; i--) {
+    const z = i * 9 - offset, next = z + 9, worldRow = row + i;
     if (next <= 0) continue;
-    for (let l = 0; l < 3; l++) {
-      const x = (l - 1) * 3.5, tint = (i + l) % 2 ? '#ffffff0a' : '#3523140b';
-      worldPoly([[x-1.74,Math.max(0,z),.015],[x+1.74,Math.max(0,z),.015],[x+1.74,next,.015],[x-1.74,next,.015]], tint, '#ecd0a329');
-      if ((i * 7 + l) % 13 === 0) { const a = scenePoint(x -.6, next -.8,.02), b = scenePoint(x-.2, next - 3,.02), c = scenePoint(x+.4,next-4,.02); line([[a.x,a.y],[b.x,b.y],[c.x,c.y]], '#5f412c25', Math.max(.5, a.s * .02)); }
+    // Two individually shaded flagstones per lane, with recessed mortar joints.
+    for (let l = 0; l < 3; l++) for (let half = 0; half < 2; half++) {
+      const x = (l - 1) * 3.5, front = Math.max(.01, z + half * 4.5 + .07), back = z + (half + 1) * 4.5 - .07;
+      if (back <= front) continue;
+      const hash = (worldRow * 37 + l * 17 + half * 23) % 19, color = stoneColor(palette.road, hash - 3);
+      const coords = [[x-1.71,front,.02],[x+1.71,front,.02],[x+1.71,back,.02],[x-1.71,back,.02]];
+      worldPoly(coords, color);
+      const a=scenePoint(x-1.66,front,.025),b=scenePoint(x+1.66,front,.025),c=scenePoint(x-1.66,back,.025);
+      line([[a.x,a.y],[b.x,b.y]], stoneColor(color,-24), Math.max(.5,a.s*.025));
+      line([[a.x,a.y],[c.x,c.y]], stoneColor(color,22), Math.max(.4,a.s*.014));
+      // Stable mineral flecks and weathering move with each slab.
+      if (front < 105) for(let grain=0;grain<5;grain++) {
+        const gx=x-1.4+((hash*7+grain*13)%29)/10, gz=front+.3+((hash*3+grain*7)%31)/10;
+        if(gz>=back-.1)continue;
+        const g=scenePoint(gx,gz,.03),h=scenePoint(gx+.08+(grain%3)*.06,gz+.08,.03);
+        line([[g.x,g.y],[h.x,h.y]],stoneColor(color,grain%2?-13:17),Math.max(.4,g.s*.012));
+      }
+      if (hash % 7 === 0) {
+        const a=scenePoint(x-.5,front+.5,.03),b=scenePoint(x-.25,front+1.4,.03),c=scenePoint(x+.1,front+1.7,.03);
+        line([[a.x,a.y],[b.x,b.y],[c.x,c.y]],stoneColor(color,-32),Math.max(.5,a.s*.02));
+      }
     }
-    for (const side of [-1, 1]) {
-      const x = side * 5.65; box(x, Math.max(.1,z), .42, 8.8, .25, '#9b7659', palette.stone, '#705442');
+    for (const side of [-1,1]) {
+      const x=side*5.62; box(x,Math.max(.01,z),.46,Math.min(8.85,next),.3,'#957654',palette.stone,'#6f553e');
+      const a=scenePoint(side*5.86,Math.max(.01,z),-.65),b=scenePoint(side*5.86,next,-.65);
+      line([[a.x,a.y],[b.x,b.y]],'#b1956b',Math.max(.5,a.s*.018));
+      const c=scenePoint(side*5.86,Math.max(.01,z),-1.36);
+      line([[a.x,a.y],[c.x,c.y]],'#3e342a',Math.max(.5,a.s*.02));
     }
   }
-  for (const l of [-1.75,1.75]) { const a = scenePoint(l,0,.015), b = scenePoint(l,340,.015); line([[a.x,a.y],[b.x,b.y]], '#fff1c52b', 1); }
+  // Narrow inlaid borders make each lane legible without painting over the stone.
+  for (const x of [-1.75,1.75]) {
+    worldPoly([[x-.035,0,.035],[x+.035,0,.035],[x+.035,340,.035],[x-.035,340,.035]],stoneColor(palette.stone,10));
+  }
   if (state === 'quiz') {
     const selectedX = (lane - 1) * 3.5;
     worldPoly([[selectedX - 1.7,0,.03],[selectedX + 1.7,0,.03],[selectedX + 1.7,180,.03],[selectedX - 1.7,180,.03]], '#efc75e30');
     for (let l = 0; l < 3; l++) { const x = (l-1)*3.5, z = PLAYER_Z + quizRemaining * 18; box(x - 1.6,z,.18,1,5,'#b68a50','#f8d58c'); box(x + 1.6,z,.18,1,5,'#b68a50','#f8d58c'); box(x,z,3.4,.7, .2, '#c79a55', '#ffe2a3');
       const p = scenePoint(x,z,4.8); ctx.save(); ctx.shadowBlur = 16; ctx.shadowColor = '#ffcd67'; ctx.fillStyle = l === lane ? '#ffe2a3' : '#bca075'; ctx.font = `${Math.max(10,p.s*.9)}px Georgia`; ctx.textAlign='center'; ctx.fillText(['I','II','III'][l],p.x,p.y); ctx.restore(); }
   }
+  ctx.restore();
 }
 function drawColumn(o, palette) {
   const p = scenePoint(o.x,o.z), s = p.s;
@@ -607,7 +642,7 @@ function drawAtmosphere() {
 }
 function render() {
   const palette=chapters[chapter];ctx.save();if(!reducedMotion && state==='running')ctx.translate(Math.sin(time*5)*.8,Math.cos(time*9)*.6);if(shake>0)ctx.translate(Math.sin(time*100)*shake*18,Math.cos(time*83)*shake*10);
-  drawSky(palette);drawRoad(palette);
+  ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';drawSky(palette);drawRoad(palette);
   const sanctuary = distance > SANCTUARY - 210 && state !== 'welcome' ? [{o:{z:SANCTUARY-distance+PLAYER_Z},sanctuary:true}] : [];
   const drawables=[...sanctuary,...sceneryObjects.map(o=>({o,scenery:true})),...objects.map(o=>({o,scenery:false})),{o:{z:PLAYER_Z},runner:true}].sort((a,b)=>b.o.z-a.o.z);
   for(const item of drawables){if(item.sanctuary)drawSanctuary(item.o.z);else if(item.runner)drawRunner();else if(item.scenery){if(item.o.type==='column')drawColumn(item.o,palette);else if(item.o.type==='torch')drawTorch(item.o,palette);else drawPalm(item.o)}else drawObstacle(item.o,palette)}
