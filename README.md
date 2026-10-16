@@ -33,10 +33,10 @@ npm run check
 npm test
 ```
 
-The dependency-free development server listens on port 3000 (override with `PORT`). Seventeen automated tests cover movement, jump/slide collision rules, trivia rewards and timing, power-ups, chapters, game over, restart, and the natural arrival of hazards.
+The dependency-free development server listens on port 3000 (override with `PORT`). Eighteen automated tests cover movement, jump/slide collision rules, trivia rewards and timing, power-ups, chapters, game over, restart, and the natural arrival of hazards.
 
 ## GitHub Pages
 
 Deploy the `main` branch from `/ (root)`. `.nojekyll` is included. All application and art assets use relative paths, including when deployed below `/Bible-Runner/`.
 
-All rendering uses the Canvas 2D API. The running platform is an opaque stone causeway with individually shaded flagstones, recessed mortar, weathering, raised curbs, and vertical masonry sides. The runner uses a detailed eight-frame character animation atlas; the projected road, obstacles, architecture, flames, and particles are drawn locally. The vector character remains available as a loading fallback. The sunset landscape is an original generated environment illustration, compressed to WebP. Chapters change its lighting and palette; the artwork is imaginative rather than a historical reconstruction. If the illustration cannot load, procedural scenery provides a fallback. Optional Google Fonts have local font fallbacks.
+All rendering uses the Canvas 2D API. The environment uses projected moving sand terrain, depth-sorted boulders and shrubs, passing palms and ruins, and a distant city that gradually approaches. World movement follows actual travel and freezes while paused. The running platform is an opaque stone causeway with individually shaded flagstones, recessed mortar, weathering, raised curbs, and vertical masonry sides. The runner uses a detailed eight-frame character animation atlas; the projected road, obstacles, architecture, flames, and particles are drawn locally. The vector character remains available as a loading fallback. The sunset landscape is an original generated environment illustration, compressed to WebP. Chapters change its lighting and palette; the artwork is imaginative rather than a historical reconstruction. If the illustration cannot load, procedural scenery provides a fallback. Optional Google Fonts have local font fallbacks.

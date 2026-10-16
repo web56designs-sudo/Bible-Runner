@@ -4,13 +4,17 @@ const canvas = $('world'), ctx = canvas.getContext('2d', { alpha: false });
 const TAU = Math.PI * 2, PLAYER_Z = 10, FAR = 120;
 const runnerSheet = new Image();
 runnerSheet.src = 'assets/runner-cycle.webp';
+const groundMaterial = new Image();
+groundMaterial.onload = () => prepareLandscape();
+groundMaterial.src = 'assets/desert-ground.webp';
 const landscape = new Image();
 const landscapeLayers = [];
+const terrainTextures = [];
 landscape.onload = () => prepareLandscape();
 landscape.src = 'assets/judean-sunset.webp';
 function prepareLandscape() {
   if (!landscape.complete || !landscape.naturalWidth || !W) return;
-  landscapeLayers.length = 0;
+  landscapeLayers.length = 0; terrainTextures.length = 0;
   for (let i = 0; i < 3; i++) {
     const layer = document.createElement('canvas'); layer.width = Math.round(W * DPR); layer.height = Math.round(H * DPR);
     const painter = layer.getContext('2d'); painter.scale(DPR, DPR);
@@ -18,6 +22,18 @@ function prepareLandscape() {
     painter.filter = i === 1 ? 'saturate(.5) hue-rotate(175deg) brightness(.75)' : i === 2 ? 'saturate(.7) hue-rotate(25deg) brightness(.9)' : 'saturate(.8) brightness(.88)';
     painter.drawImage(landscape, (W - landscape.naturalWidth * scale) / 2, (H - landscape.naturalHeight * scale) / 2, landscape.naturalWidth * scale, landscape.naturalHeight * scale);
     landscapeLayers.push(layer);
+    if (groundMaterial.complete && groundMaterial.naturalWidth) {
+      const textures = [];
+      for (let variation = 0; variation < 4; variation++) {
+        const tile = document.createElement('canvas'); tile.width = tile.height = 256;
+        const brush = tile.getContext('2d'); brush.filter = painter.filter;
+        brush.translate(variation % 2 ? 256 : 0, variation >= 2 ? 256 : 0);
+        brush.scale(variation % 2 ? -1 : 1, variation >= 2 ? -1 : 1);
+        brush.drawImage(groundMaterial,0,0,256,256);
+        textures.push(tile);
+      }
+      terrainTextures.push(textures);
+    }
   }
 }
 const reducedMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
@@ -55,6 +71,7 @@ const questions = [
 let W = 0, H = 0, DPR = 1, horizon = 0, focal = 0;
 let state = 'welcome', beforePause = 'running', lane = 1, smoothLane = 1, distance = 0, coins = 0, points = 0, hearts = 3;
 let jump = 0, slide = 0, invincible = 0, shield = 0, magnet = 0, multiplier = 1, streak = 0;
+let terrainProps = [];
 let objects = [], particles = [], sceneryObjects = [], spawnTimer = 0, nextQuiz = 220;
 let quizRemaining = 0, quizTotal = 7, currentQuestion = null, correctAnswers = 0, attempted = 0, questionDeck = [];
 let chapter = 0, time = 0, lastTime = 0, toastTime = 0, revealTime = 0, shake = 0, sound = true, audio;
@@ -248,6 +265,8 @@ updateSound(); $('sound').onclick = () => {
 };
 $('fullscreen').onclick = async () => { try { if (document.fullscreenElement) await document.exitFullscreen(); else await $('app').requestFullscreen(); } catch { notify('Full screen unavailable', 'Your browser still supports swipe and button controls.'); } };
 function buildScenery() {
+  terrainProps = [];
+  for (let i = 0; i < 84; i++) terrainProps.push({z:12+i*4.5,x:(i%2?1:-1)*random(8,65),width:random(.7,3.5),height:random(.35,2.4),type:i%5===0?'shrub':'boulder',seed:i});
   sceneryObjects = [];
   for (let i = 0; i < 38; i++) {
     const z = 12 + i * 8;
@@ -417,7 +436,10 @@ function update(dt) {
   accumulator += dt; if (accumulator > .08) { updateHUD(); accumulator = 0; }
 }
 function collect(object) { coins++; points += 10 * multiplier; burst((object.lane - 1) * 3.5, object.z, 1.3, 5, '#ffdc88'); tone(900 + coins % 5 * 80, .08, 'sine', .025); }
-function moveScenery(amount) { sceneryObjects.forEach(o => { o.z -= amount; if (o.z < -12) o.z += 304; }); }
+function moveScenery(amount) {
+  sceneryObjects.forEach(o => { o.z -= amount; if (o.z < -12) o.z += 304; });
+  terrainProps.forEach(o => { o.z -= amount; if (o.z < -12) o.z += 390; });
+}
 function box(x, z, width, depth, height, color, top, side) {
   const a = x - width / 2, b = x + width / 2;
   worldPoly([[a,z,0],[b,z,0],[b,z,height],[a,z,height]], color);
@@ -426,7 +448,10 @@ function box(x, z, width, depth, height, color, top, side) {
 }
 function drawSky(palette) {
   if (landscapeLayers[chapter]) {
-    ctx.drawImage(landscapeLayers[chapter], 0, 0, W, H);
+    // Distant landmarks slowly approach; the near ground is rendered in world space.
+    const travel=state==='welcome'?demoDistance:distance,approach=1+Math.min(travel/SANCTUARY,1)*.22;
+    const drift=reducedMotion?0:-(smoothLane-1)*Math.min(12,W*.015);
+    ctx.drawImage(landscapeLayers[chapter], W/2*(1-approach)+drift, horizon*(1-approach), W*approach, H*approach);
     const shade = ctx.createLinearGradient(0, 0, 0, H); shade.addColorStop(0, "#17152335"); shade.addColorStop(.4, "#251b2210"); shade.addColorStop(1, "#251b2250"); ctx.fillStyle = shade; ctx.fillRect(0, 0, W, H);
     return;
   }
@@ -451,6 +476,45 @@ function drawSky(palette) {
   // Birds drift above the skyline.
   ctx.strokeStyle = '#382d3866'; ctx.lineWidth = 1;
   for (let i = 0; i < 5; i++) { const x = ((time * 6 + i * 59) % (W + 100)) - 30, y = horizon * .48 + Math.sin(i * 2) * 25; const wing = Math.sin(time * 3 + i) * 3; ctx.beginPath(); ctx.moveTo(x - 5, y - wing); ctx.quadraticCurveTo(x - 2, y - 2, x, y); ctx.quadraticCurveTo(x + 2, y - 2, x + 5, y - wing); ctx.stroke(); }
+}
+function texturedTriangle(texture, a, b, c, second = false) {
+  ctx.save();ctx.beginPath();ctx.moveTo(a.x,a.y);ctx.lineTo(b.x,b.y);ctx.lineTo(c.x,c.y);ctx.closePath();ctx.clip();
+  const size=texture.width;
+  if(second)ctx.transform((a.x-c.x)/size,(a.y-c.y)/size,(a.x-b.x)/size,(a.y-b.y)/size,b.x+c.x-a.x,b.y+c.y-a.y);
+  else ctx.transform((b.x-a.x)/size,(b.y-a.y)/size,(c.x-a.x)/size,(c.y-a.y)/size,a.x,a.y);
+  ctx.drawImage(texture,0,0);ctx.restore();
+}
+function drawTerrain(palette) {
+  const travel=state==='welcome'?demoDistance:distance,offset=travel%24,row=Math.floor(travel/24);
+  const textures=terrainTextures[chapter];ctx.save();ctx.globalAlpha=1;
+  // Opaque textured land outside the causeway, moving at the same world speed.
+  for(let i=15;i>=0;i--){const near=Math.max(.01,i*24-offset),far=(i+1)*24-offset;if(far<=0)continue;
+    for(const side of [-1,1])for(let band=0;band<4;band++){
+      const bounds=[5.86,26,46,86,166],inner=side*bounds[band],outer=side*bounds[band+1],level=-1.55;
+      const a=scenePoint(inner,near,level),b=scenePoint(outer,near,level),c=scenePoint(inner,far,level),d=scenePoint(outer,far,level);
+      if(Math.min(a.x,b.x,c.x,d.x)>W+2||Math.max(a.x,b.x,c.x,d.x)<-2||Math.min(a.y,b.y,c.y,d.y)>H+2)continue;
+      ctx.globalAlpha=clamp((385-near)/190,0,1);
+      if(textures){const texture=textures[((row+i)%2)*2+(band%2)];texturedTriangle(texture,a,b,c);texturedTriangle(texture,d,b,c,true);}
+      else poly([a,b,d,c],palette.sand);
+    }
+  }
+  // Blend only the remote horizon into the distant vista, never the running platform.
+  ctx.globalAlpha=1;
+  const mist=ctx.createLinearGradient(0,horizon,0,horizon+H*.13);mist.addColorStop(0,palette.fog+'65');mist.addColorStop(1,palette.fog+'00');ctx.fillStyle=mist;ctx.fillRect(0,horizon,W,H*.13);
+  ctx.restore();
+}
+function drawTerrainProp(o,palette){
+  const ground=-1.55,p=scenePoint(o.x,o.z,ground),s=p.s;if(p.x<-s*5||p.x>W+s*5||p.y>H+s*5||o.z<0)return;
+  ctx.save();ctx.globalAlpha=Math.min(1,(390-o.z)/55);const x=o.x,z=o.z,w=o.width,h=o.height;
+  ellipse(p.x+s*.35,p.y+s*.08,s*w*.7,s*w*.17,'#362c2538');
+  if(o.type==='shrub'){
+    for(let i=0;i<7;i++){const base=scenePoint(x,z,ground),tip=scenePoint(x+Math.sin(i*2.4)*w*.65,z+Math.cos(i)*w*.4,ground+h*(.5+(i%3)*.2));line([[base.x,base.y],[tip.x,tip.y]],chapter===2?'#647044':'#887447',Math.max(1,s*.045));}
+  }else{
+    const points=[[x-w*.6,z,ground],[x+w*.55,z,ground],[x+w*.42,z+w*.7,ground+h*.65],[x-w*.15,z+w*.8,ground+h],[x-w*.5,z+w*.4,ground+h*.6]];
+    worldPoly(points,chapter===1?'#817570':chapter===2?'#89856b':'#a38361');
+    worldPoly([[x-w*.6,z,ground],[x+w*.55,z,ground],[x+w*.25,z,ground+h*.55],[x-w*.3,z,ground+h*.75]],chapter===1?'#655b5b':chapter===2?'#67684e':'#806045');
+    worldPoly([[x-w*.3,z,ground+h*.75],[x+w*.25,z,ground+h*.55],[x+w*.42,z+w*.7,ground+h*.65],[x-w*.15,z+w*.8,ground+h]],palette.stone);
+  }ctx.restore();
 }
 function stoneColor(hex, shift) {
   const value = parseInt(hex.slice(1), 16);
@@ -642,10 +706,10 @@ function drawAtmosphere() {
 }
 function render() {
   const palette=chapters[chapter];ctx.save();if(!reducedMotion && state==='running')ctx.translate(Math.sin(time*5)*.8,Math.cos(time*9)*.6);if(shake>0)ctx.translate(Math.sin(time*100)*shake*18,Math.cos(time*83)*shake*10);
-  ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';drawSky(palette);drawRoad(palette);
+  ctx.globalAlpha=1;ctx.globalCompositeOperation='source-over';drawSky(palette);drawTerrain(palette);drawRoad(palette);
   const sanctuary = distance > SANCTUARY - 210 && state !== 'welcome' ? [{o:{z:SANCTUARY-distance+PLAYER_Z},sanctuary:true}] : [];
-  const drawables=[...sanctuary,...sceneryObjects.map(o=>({o,scenery:true})),...objects.map(o=>({o,scenery:false})),{o:{z:PLAYER_Z},runner:true}].sort((a,b)=>b.o.z-a.o.z);
-  for(const item of drawables){if(item.sanctuary)drawSanctuary(item.o.z);else if(item.runner)drawRunner();else if(item.scenery){if(item.o.type==='column')drawColumn(item.o,palette);else if(item.o.type==='torch')drawTorch(item.o,palette);else drawPalm(item.o)}else drawObstacle(item.o,palette)}
+  const drawables=[...terrainProps.map(o=>({o,terrain:true})),...sanctuary,...sceneryObjects.map(o=>({o,scenery:true})),...objects.map(o=>({o,scenery:false})),{o:{z:PLAYER_Z},runner:true}].sort((a,b)=>b.o.z-a.o.z);
+  for(const item of drawables){if(item.terrain)drawTerrainProp(item.o,palette);else if(item.sanctuary)drawSanctuary(item.o.z);else if(item.runner)drawRunner();else if(item.scenery){if(item.o.type==='column')drawColumn(item.o,palette);else if(item.o.type==='torch')drawTorch(item.o,palette);else drawPalm(item.o)}else drawObstacle(item.o,palette)}
   drawParticles();drawAtmosphere();const haze=ctx.createLinearGradient(0,horizon-10,0,horizon+80);haze.addColorStop(0,palette.fog+'00');haze.addColorStop(.3,palette.fog+'40');haze.addColorStop(1,palette.fog+'00');ctx.fillStyle=haze;ctx.fillRect(0,horizon-10,W,100);
   ctx.restore();
 }
